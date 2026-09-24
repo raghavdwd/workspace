@@ -1,80 +1,63 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/jwt";
 import { db } from "@/db/db";
-import { notebooksTable, notebookSharesTable, notificationsTable } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { notebooksTable, notebookTabsTable, notebookSharesTable, notificationsTable } from "@/db/schema";
+import { eq, and, asc } from "drizzle-orm";
 import { updateNotebookSchema } from "@/interface/notebook";
+import { getUserIdFromRequest, getNotebookWithRole } from "@/lib/notebook-auth";
 
-function getUserId(request: NextRequest): number | null {
-  const token = request.cookies.get("accessToken")?.value;
-  if (!token) return null;
-  try {
-    const decoded = verifyToken(token);
-    return decoded.user.id;
-  } catch {
-    return null;
-  }
-}
-
-// GET /api/notebooks/[id] — get single notebook with permission calculation
+// GET /api/notebooks/[id] — get single notebook with permission calculation and tabs
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const userId = getUserId(request);
+    const userId = getUserIdFromRequest(request);
     const { id } = await params;
     const notebookId = Number(id);
     if (isNaN(notebookId)) {
       return NextResponse.json({ message: "Invalid notebook ID" }, { status: 400 });
     }
 
-    const [notebook] = await db
-      .select()
-      .from(notebooksTable)
-      .where(eq(notebooksTable.id, notebookId))
-      .limit(1);
+    const { notebook, role } = await getNotebookWithRole(notebookId, userId);
 
     if (!notebook) {
       return NextResponse.json({ message: "Notebook not found" }, { status: 404 });
     }
 
-    let effectiveRole: "owner" | "editor" | "viewer" | null = null;
-
-    if (userId && notebook.userId === userId) {
-      effectiveRole = "owner";
-    } else if (userId) {
-      const [share] = await db
-        .select({ role: notebookSharesTable.role })
-        .from(notebookSharesTable)
-        .where(
-          and(
-            eq(notebookSharesTable.notebookId, notebookId),
-            eq(notebookSharesTable.sharedWithUserId, userId),
-          ),
-        )
-        .limit(1);
-
-      if (share) {
-        effectiveRole = share.role;
-      }
-    }
-
-    if (!effectiveRole && notebook.publicAccess !== "off") {
-      effectiveRole = notebook.publicAccess as "editor" | "viewer";
-    }
-
-    if (!effectiveRole) {
+    if (!role) {
       return NextResponse.json(
         { message: userId ? "Access denied" : "Unauthorized" },
         { status: userId ? 403 : 401 },
       );
     }
 
+    // Fetch ordered tabs for the notebook
+    let tabs = await db
+      .select()
+      .from(notebookTabsTable)
+      .where(eq(notebookTabsTable.notebookId, notebookId))
+      .orderBy(asc(notebookTabsTable.orderIndex), asc(notebookTabsTable.id));
+
+    // If notebook has no tabs yet, auto-create initial tab
+    if (tabs.length === 0) {
+      const [newTab] = await db
+        .insert(notebookTabsTable)
+        .values({
+          notebookId,
+          title: "Main",
+          icon: notebook.icon || "📄",
+          content: notebook.content || "",
+          orderIndex: 0,
+        })
+        .returning();
+      tabs = [newTab];
+    }
+
     return NextResponse.json({
       data: {
         ...notebook,
-        userRole: effectiveRole,
+        tabs,
+        userRole: role,
       },
     });
   } catch (error) {
@@ -92,46 +75,20 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const userId = getUserId(request);
+    const userId = getUserIdFromRequest(request);
     const { id } = await params;
     const notebookId = Number(id);
     if (isNaN(notebookId)) {
       return NextResponse.json({ message: "Invalid notebook ID" }, { status: 400 });
     }
 
-    const [notebook] = await db
-      .select()
-      .from(notebooksTable)
-      .where(eq(notebooksTable.id, notebookId))
-      .limit(1);
+    const { notebook, role } = await getNotebookWithRole(notebookId, userId);
 
     if (!notebook) {
       return NextResponse.json({ message: "Notebook not found" }, { status: 404 });
     }
 
-    let canEdit = false;
-    if (userId && notebook.userId === userId) {
-      canEdit = true;
-    } else if (userId) {
-      const [editorShare] = await db
-        .select({ id: notebookSharesTable.id })
-        .from(notebookSharesTable)
-        .where(
-          and(
-            eq(notebookSharesTable.notebookId, notebookId),
-            eq(notebookSharesTable.sharedWithUserId, userId),
-            eq(notebookSharesTable.role, "editor"),
-          ),
-        )
-        .limit(1);
-      canEdit = !!editorShare;
-    }
-
-    if (!canEdit && notebook.publicAccess === "editor") {
-      canEdit = true;
-    }
-
-    if (!canEdit) {
+    if (role !== "owner" && role !== "editor") {
       return NextResponse.json(
         { message: "You do not have permission to edit this notebook" },
         { status: 403 },
@@ -178,7 +135,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const userId = getUserId(request);
+    const userId = getUserIdFromRequest(request);
     if (!userId) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }

@@ -18,6 +18,8 @@ import {
 import { toggleTodo } from "@/lib/todo-parser";
 import { toast } from "sonner";
 import { ShareNotebookModal } from "@/components/share-notebook-modal";
+import { NotebookTab } from "@/interface/notebook";
+import { NotebookTabsBar } from "@/components/notebook-tabs-bar";
 
 // Types
 
@@ -27,6 +29,7 @@ interface NotebookData {
   subtitle: string | null;
   icon: string | null;
   content: string;
+  tabs?: NotebookTab[];
   updatedAt: string | null;
   userRole?: "owner" | "editor" | "viewer";
 }
@@ -65,6 +68,10 @@ export default function NotebookEditor({
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [tabs, setTabs] = useState<NotebookTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<number | null>(null);
+  const activeTabIdRef = useRef<number | null>(null);
+
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -102,31 +109,26 @@ export default function NotebookEditor({
     },
   });
 
-  useEffect(() => {
-    if (data?.data) {
-      setTitle(data.data.title);
-      setContent(data.data.content);
-      setInitialized(true);
-      if (data.data.userRole === "viewer") {
-        setPreview(true);
-      }
-    }
-  }, [data]);
-
   const userRole = data?.data?.userRole ?? "owner";
   const isReadOnly = userRole === "viewer";
   const isOwner = userRole === "owner";
 
-  // Auto-save mutation
-  const saveMutation = useMutation({
-    mutationFn: async (updates: Record<string, unknown>) => {
+  // Tab save mutation
+  const saveTabMutation = useMutation({
+    mutationFn: async ({
+      tabId,
+      updates,
+    }: {
+      tabId: number;
+      updates: Record<string, unknown>;
+    }) => {
       if (isReadOnly) return;
-      const res = await fetch(`/api/notebooks/${notebookId}`, {
+      const res = await fetch(`/api/notebooks/${notebookId}/tabs/${tabId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
-      if (!res.ok) throw new Error("Failed to save");
+      if (!res.ok) throw new Error("Failed to save tab");
       return res.json();
     },
     onSuccess: () => {
@@ -137,17 +139,196 @@ export default function NotebookEditor({
     onError: () => setSaving(false),
   });
 
-  const scheduleSave = useCallback(
+  // Notebook metadata save mutation (title, subtitle, icon)
+  const saveNotebookMutation = useMutation({
+    mutationFn: async (updates: Record<string, unknown>) => {
+      if (isReadOnly) return;
+      const res = await fetch(`/api/notebooks/${notebookId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error("Failed to save notebook");
+      return res.json();
+    },
+    onSuccess: () => {
+      setSaving(false);
+      queryClient.invalidateQueries({ queryKey: ["notebooks"] });
+      queryClient.invalidateQueries({ queryKey: ["notebook", notebookId] });
+    },
+    onError: () => setSaving(false),
+  });
+
+  const scheduleSaveTab = useCallback(
+    (tabId: number | null, updates: Record<string, unknown>) => {
+      if (isReadOnly || !tabId) return;
+      setSaving(true);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        saveTabMutation.mutate({ tabId, updates });
+      }, 1200);
+    },
+    [saveTabMutation, isReadOnly],
+  );
+
+  const scheduleSaveNotebook = useCallback(
     (updates: Record<string, unknown>) => {
       if (isReadOnly) return;
       setSaving(true);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        saveMutation.mutate(updates);
-      }, 1500);
+        saveNotebookMutation.mutate(updates);
+      }, 1200);
     },
-    [saveMutation, isReadOnly],
+    [saveNotebookMutation, isReadOnly],
   );
+
+  // Tab switching with pending save flush
+  const handleSelectTab = useCallback(
+    (newTabId: number, currentTabs?: NotebookTab[]) => {
+      if (newTabId === activeTabIdRef.current) return;
+
+      // Flush any pending save for current tab
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        if (activeTabIdRef.current) {
+          saveTabMutation.mutate({
+            tabId: activeTabIdRef.current,
+            updates: { content: contentRef.current },
+          });
+        }
+      }
+
+      const list = currentTabs || tabs;
+      const targetTab = list.find((t) => t.id === newTabId);
+      if (targetTab) {
+        setActiveTabId(newTabId);
+        activeTabIdRef.current = newTabId;
+        setContent(targetTab.content);
+        contentRef.current = targetTab.content;
+      }
+    },
+    [tabs, saveTabMutation],
+  );
+
+  // Add tab mutation
+  const addTabMutation = useMutation({
+    mutationFn: async (tabTitle?: string) => {
+      if (isReadOnly) return;
+      const res = await fetch(`/api/notebooks/${notebookId}/tabs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: tabTitle || `Tab ${tabs.length + 1}`,
+          icon: "📄",
+          content: "",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to create tab");
+      return res.json();
+    },
+    onSuccess: (res) => {
+      const newTab: NotebookTab = res.data;
+      setTabs((prev) => {
+        const nextTabs = [...prev, newTab];
+        setTimeout(() => handleSelectTab(newTab.id, nextTabs), 0);
+        return nextTabs;
+      });
+      toast.success(`Created tab "${newTab.title}"`);
+      queryClient.invalidateQueries({ queryKey: ["notebook", notebookId] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  // Rename tab mutation
+  const renameTabMutation = useMutation({
+    mutationFn: async ({ tabId, title }: { tabId: number; title: string }) => {
+      if (isReadOnly) return;
+      const res = await fetch(`/api/notebooks/${notebookId}/tabs/${tabId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) throw new Error("Failed to rename tab");
+      return res.json();
+    },
+    onSuccess: (_, variables) => {
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === variables.tabId ? { ...t, title: variables.title } : t,
+        ),
+      );
+      toast.success("Tab renamed");
+      queryClient.invalidateQueries({ queryKey: ["notebook", notebookId] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  // Delete tab mutation
+  const deleteTabMutation = useMutation({
+    mutationFn: async (tabId: number) => {
+      if (isReadOnly) return;
+      const res = await fetch(`/api/notebooks/${notebookId}/tabs/${tabId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to delete tab");
+      }
+      return res.json();
+    },
+    onSuccess: (_, deletedTabId) => {
+      setTabs((prev) => {
+        const remaining = prev.filter((t) => t.id !== deletedTabId);
+        if (activeTabIdRef.current === deletedTabId && remaining.length > 0) {
+          setTimeout(() => handleSelectTab(remaining[0].id, remaining), 0);
+        }
+        return remaining;
+      });
+      toast.success("Tab deleted");
+      queryClient.invalidateQueries({ queryKey: ["notebook", notebookId] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  const handleDuplicateTab = (tabId: number) => {
+    const sourceTab = tabs.find((t) => t.id === tabId);
+    if (!sourceTab) return;
+    addTabMutation.mutate(`${sourceTab.title} (Copy)`);
+  };
+
+  useEffect(() => {
+    if (data?.data) {
+      setTitle(data.data.title);
+      const loadedTabs = data.data.tabs || [];
+      setTabs(loadedTabs);
+
+      if (loadedTabs.length > 0) {
+        const currentActive = activeTabIdRef.current;
+        const targetTab =
+          loadedTabs.find((t) => t.id === currentActive) || loadedTabs[0];
+        setActiveTabId(targetTab.id);
+        activeTabIdRef.current = targetTab.id;
+        setContent(targetTab.content);
+        contentRef.current = targetTab.content;
+      } else {
+        setContent(data.data.content || "");
+        contentRef.current = data.data.content || "";
+      }
+
+      setInitialized(true);
+      if (data.data.userRole === "viewer") {
+        setPreview(true);
+      }
+    }
+  }, [data]);
 
   useEffect(() => {
     return () => {
@@ -159,7 +340,7 @@ export default function NotebookEditor({
     if (isReadOnly) return;
     const newTitle = e.target.value;
     setTitle(newTitle);
-    scheduleSave({ title: newTitle });
+    scheduleSaveNotebook({ title: newTitle });
   };
 
   const replaceUploadedPlaceholder = (
@@ -168,7 +349,12 @@ export default function NotebookEditor({
   ) => {
     setContent((current) => {
       const updated = current.replace(placeholder, replacement);
-      scheduleSave({ content: updated });
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === activeTabIdRef.current ? { ...t, content: updated } : t,
+        ),
+      );
+      scheduleSaveTab(activeTabIdRef.current, { content: updated });
       return updated;
     });
   };
@@ -217,7 +403,12 @@ export default function NotebookEditor({
     const inserted = placeholders.join("\n");
     const nextContent = content.slice(0, start) + inserted + content.slice(end);
     setContent(nextContent);
-    scheduleSave({ content: nextContent });
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id === activeTabIdRef.current ? { ...t, content: nextContent } : t,
+      ),
+    );
+    scheduleSaveTab(activeTabIdRef.current, { content: nextContent });
 
     await Promise.all(
       files.map((file, index) => {
@@ -231,7 +422,12 @@ export default function NotebookEditor({
     if (isReadOnly) return;
     const newContent = e.target.value;
     setContent(newContent);
-    scheduleSave({ content: newContent });
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id === activeTabIdRef.current ? { ...t, content: newContent } : t,
+      ),
+    );
+    scheduleSaveTab(activeTabIdRef.current, { content: newContent });
     if (debounceRef.current) clearTimeout(debounceRef.current);
   };
 
@@ -246,7 +442,12 @@ export default function NotebookEditor({
     const after = content.substring(end);
     const newContent = before + "- [ ] " + after;
     setContent(newContent);
-    scheduleSave({ content: newContent });
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id === activeTabIdRef.current ? { ...t, content: newContent } : t,
+      ),
+    );
+    scheduleSaveTab(activeTabIdRef.current, { content: newContent });
 
     requestAnimationFrame(() => {
       textarea.focus();
@@ -268,14 +469,19 @@ export default function NotebookEditor({
           if (idx === targetIdx) {
             const newContent = toggleTodo(currentContent, i);
             setContent(newContent);
-            scheduleSave({ content: newContent });
+            setTabs((prev) =>
+              prev.map((t) =>
+                t.id === activeTabIdRef.current ? { ...t, content: newContent } : t,
+              ),
+            );
+            scheduleSaveTab(activeTabIdRef.current, { content: newContent });
             return;
           }
           idx++;
         }
       }
     },
-    [scheduleSave, isReadOnly],
+    [scheduleSaveTab, isReadOnly],
   );
 
   const polishMutation = useMutation({
@@ -297,7 +503,12 @@ export default function NotebookEditor({
       const polished = result.data.polished;
       if (window.confirm("Accept polished version?")) {
         setContent(polished);
-        scheduleSave({ content: polished });
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === activeTabIdRef.current ? { ...t, content: polished } : t,
+          ),
+        );
+        scheduleSaveTab(activeTabIdRef.current, { content: polished });
       }
     },
     onError: (error: Error) => {
@@ -474,6 +685,22 @@ export default function NotebookEditor({
         )}
       </div>
 
+      {/* Document Tabs Bar */}
+      {tabs.length > 0 && (
+        <NotebookTabsBar
+          tabs={tabs}
+          activeTabId={activeTabId ?? tabs[0]?.id ?? 0}
+          onSelectTab={(tabId) => handleSelectTab(tabId)}
+          onAddTab={() => addTabMutation.mutate()}
+          onRenameTab={(tabId, newTitle) =>
+            renameTabMutation.mutate({ tabId, title: newTitle })
+          }
+          onDuplicateTab={handleDuplicateTab}
+          onDeleteTab={(tabId) => deleteTabMutation.mutate(tabId)}
+          isReadOnly={isReadOnly}
+        />
+      )}
+
       {/* Editor body */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="max-w-3xl mx-auto w-full px-8 py-6 flex-1 flex flex-col min-h-0">
@@ -524,6 +751,22 @@ export default function NotebookEditor({
               />
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Editor Status Bar */}
+      <div className="border-t bg-muted/20 px-6 py-1.5 flex items-center justify-between text-[11px] text-muted-foreground shrink-0 select-none">
+        <div className="flex items-center gap-3">
+          <span>{content.trim() ? content.trim().split(/\s+/).length : 0} words</span>
+          <span>•</span>
+          <span>{content.length} characters</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {tabs.length > 1 && (
+            <span>
+              Tab {Math.max(1, tabs.findIndex((t) => t.id === activeTabId) + 1)} of {tabs.length}
+            </span>
+          )}
         </div>
       </div>
 

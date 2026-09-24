@@ -54,6 +54,21 @@ export const notebooksTable = pgTable("notebooks", {
     .$onUpdate(() => new Date()),
 });
 
+export const notebookTabsTable = pgTable("notebook_tabs", {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  notebookId: integer("notebook_id")
+    .notNull()
+    .references(() => notebooksTable.id, { onDelete: "cascade" }),
+  title: varchar({ length: 255 }).notNull().default("Tab 1"),
+  icon: varchar({ length: 10 }).default("📄"),
+  content: text().notNull().default(""),
+  orderIndex: integer("order_index").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
 export const notebookSharesTable = pgTable("notebook_shares", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   notebookId: integer()
