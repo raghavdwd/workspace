@@ -747,7 +747,7 @@ export default function NotebookEditor({
                 onChange={handleContentChange}
                 onPaste={handleImagePaste}
                 placeholder="Start writing in markdown..."
-                className="w-full min-h-full bg-transparent border-none outline-none resize-none leading-relaxed placeholder:text-muted-foreground/30 font-mono text-sm"
+                className="w-full min-h-full bg-transparent border-none outline-none resize-none leading-relaxed sm:leading-7 text-[15px] sm:text-base font-mono text-foreground placeholder:text-muted-foreground/35 selection:bg-primary/20"
               />
             )}
           </div>

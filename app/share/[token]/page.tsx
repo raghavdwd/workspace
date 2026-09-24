@@ -233,6 +233,45 @@ export default function PublicSharePage({
     [isEditor, saveTabMutation],
   );
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const renameTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-resize textarea height to fit content seamlessly like document canvas
+  useEffect(() => {
+    if (isEditMode && textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.max(500, textareaRef.current.scrollHeight)}px`;
+    }
+  }, [tabContent, isEditMode]);
+
+  // Rename Tab Mutation for Public Editor
+  const renameTabMutation = useMutation({
+    mutationFn: async ({ tabId, title }: { tabId: number; title: string }) => {
+      if (!isEditor) return;
+      const res = await fetch(`/api/share/${token}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tabId, title }),
+      });
+      if (!res.ok) throw new Error("Failed to rename tab");
+      return res.json();
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  const handleRenameTab = (tabId: number, newTitle: string) => {
+    if (!isEditor || !tabId) return;
+    setTabsState((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, title: newTitle } : t)),
+    );
+    if (renameTimer.current) clearTimeout(renameTimer.current);
+    renameTimer.current = setTimeout(() => {
+      renameTabMutation.mutate({ tabId, title: newTitle });
+    }, 800);
+  };
+
   // Add Tab Mutation for Public Editor
   const addTabMutation = useMutation({
     mutationFn: async () => {
@@ -595,17 +634,29 @@ export default function PublicSharePage({
             {/* Tab Header Banner */}
             <div className="pb-4 border-b space-y-2">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">{activeTab?.icon || "📄"}</span>
-                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-                    {activeTab?.title || "Untitled Tab"}
-                  </h1>
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <span className="text-2xl shrink-0">{activeTab?.icon || "📄"}</span>
+                  {isEditor && isEditMode ? (
+                    <input
+                      type="text"
+                      value={activeTab?.title || ""}
+                      onChange={(e) =>
+                        handleRenameTab(activeTabIdRef.current || 0, e.target.value)
+                      }
+                      placeholder="Untitled Tab"
+                      className="w-full text-2xl sm:text-3xl font-bold tracking-tight bg-transparent border-none outline-none placeholder:text-muted-foreground/30 focus:outline-none"
+                    />
+                  ) : (
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight truncate">
+                      {activeTab?.title || "Untitled Tab"}
+                    </h1>
+                  )}
                 </div>
 
                 {/* Status / Reading Stats */}
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
                   {saving && (
-                    <span className="flex items-center gap-1 text-primary">
+                    <span className="flex items-center gap-1 text-primary font-medium">
                       <LoaderCircleIcon className="size-3 animate-spin" />
                       Saving...
                     </span>
@@ -634,15 +685,12 @@ export default function PublicSharePage({
 
             {/* Content Area: View or Edit */}
             {isEditor && isEditMode ? (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Markdown format supported</span>
-                  <span>Auto-saves on change</span>
-                </div>
+              <div className="w-full pt-1">
                 <textarea
+                  ref={textareaRef}
                   value={tabContent}
                   onChange={handleContentChange}
-                  className="w-full min-h-[500px] p-5 border rounded-xl bg-background font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-xs"
+                  className="w-full min-h-[500px] bg-transparent border-none outline-none resize-none leading-relaxed sm:leading-7 text-[15px] sm:text-base font-mono text-foreground placeholder:text-muted-foreground/35 selection:bg-primary/20 overflow-hidden"
                   placeholder="Start writing in markdown..."
                 />
               </div>
@@ -725,6 +773,24 @@ export default function PublicSharePage({
           </aside>
         )}
       </div>
+
+      {/* Editor & Document Status Bar */}
+      <footer className="border-t bg-muted/20 px-6 py-1.5 flex items-center justify-between text-[11px] text-muted-foreground shrink-0 select-none">
+        <div className="flex items-center gap-3">
+          <span>{wordCount} words</span>
+          <span>•</span>
+          <span>{tabContent.length} characters</span>
+          <span>•</span>
+          <span>{readingMinutes} min read</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {tabsState.length > 1 && (
+            <span>
+              Tab {Math.max(1, tabsState.findIndex((t) => t.id === activeTabId) + 1)} of {tabsState.length}
+            </span>
+          )}
+        </div>
+      </footer>
     </div>
   );
 }
