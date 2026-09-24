@@ -80,7 +80,8 @@ function VerifyOtpForm() {
       }
 
       toast.success("OTP verified successfully!");
-      router.push("/dashboard");
+      router.refresh();
+      window.location.replace("/dashboard");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Invalid OTP code");
     }

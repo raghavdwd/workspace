@@ -52,7 +52,8 @@ export default function SignUp() {
         throw new Error(data.message || "Sign up failed");
       }
       toast.success("Account created successfully!");
-      router.push("/dashboard");
+      router.refresh();
+      window.location.replace("/dashboard");
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to create an account",

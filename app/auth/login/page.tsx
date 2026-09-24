@@ -17,11 +17,13 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { loginSchema } from "@/interface/form";
 
 export default function Login() {
   const router = useRouter();
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
@@ -49,9 +51,12 @@ export default function Login() {
       }
       console.log("Login successful", data);
 
+      setIsRedirecting(true);
       toast.success("Login successful!");
-      router.push("/dashboard"); // Redirect to home or dashboard
+      router.refresh();
+      window.location.replace("/dashboard");
     } catch (error) {
+      setIsRedirecting(false);
       toast.error(
         error instanceof Error ? error.message : "Invalid email or password",
       );
@@ -97,10 +102,10 @@ export default function Login() {
             />
             <Button
               type="submit"
-              className="w-full"
-              disabled={mutation.isPending}
+              className="w-full cursor-pointer"
+              disabled={mutation.isPending || isRedirecting}
             >
-              {mutation.isPending ? "Logging in..." : "Login"}
+              {mutation.isPending || isRedirecting ? "Logging in..." : "Login"}
             </Button>
           </form>
         </Form>
