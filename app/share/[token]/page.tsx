@@ -410,27 +410,27 @@ export default function PublicSharePage({
   const renderTabsList = () => (
     <div className="flex flex-col h-full">
       {/* Search Input */}
-      <div className="p-3 border-b">
+      <div className="p-3.5 border-b">
         <div className="relative">
-          <Search className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search tabs..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 bg-muted/50 border rounded-lg text-xs placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
+            className="w-full pl-9 pr-3 py-2 bg-muted/50 border rounded-lg text-sm placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary transition-all"
           />
         </div>
       </div>
 
       {/* Tabs Items */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+      <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+        <div className="px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
           <span>Document Tabs ({tabsState.length})</span>
           {isEditor && (
             <button
               onClick={() => addTabMutation.mutate()}
-              className="text-primary hover:text-primary/80 transition-colors flex items-center gap-0.5 cursor-pointer"
+              className="text-primary hover:text-primary/80 transition-colors flex items-center gap-1 text-xs font-medium cursor-pointer"
               title="Add tab"
             >
               <Plus className="size-3.5" />
@@ -449,18 +449,18 @@ export default function PublicSharePage({
             <button
               key={tab.id}
               onClick={() => handleSelectTab(tab.id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all text-left cursor-pointer ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all text-left cursor-pointer ${
                 isActive
                   ? "bg-primary/10 text-primary font-semibold shadow-xs"
                   : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
               }`}
             >
-              <span className="text-sm shrink-0">
-                {tab.icon || <FileText className="size-3.5" />}
+              <span className="text-base shrink-0 leading-none">
+                {tab.icon || <FileText className="size-4" />}
               </span>
               <span className="truncate flex-1 font-medium">{tab.title}</span>
               {tabWords > 0 && (
-                <span className="text-[10px] text-muted-foreground/60 shrink-0">
+                <span className="text-xs text-muted-foreground/60 shrink-0 font-normal">
                   {tabWords}w
                 </span>
               )}
@@ -469,23 +469,23 @@ export default function PublicSharePage({
         })}
 
         {filteredTabs.length === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-6">
+          <p className="text-sm text-muted-foreground text-center py-6">
             No tabs match &quot;{searchQuery}&quot;
           </p>
         )}
       </div>
 
       {/* Owner Info & Access Footer */}
-      <div className="p-3 border-t bg-muted/20">
-        <div className="flex items-center gap-2.5">
-          <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs uppercase shrink-0">
+      <div className="p-3.5 border-t bg-muted/20">
+        <div className="flex items-center gap-3">
+          <div className="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm uppercase shrink-0">
             {notebook.owner.username[0]}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold truncate">
+            <p className="text-sm font-semibold truncate">
               {notebook.owner.displayName || notebook.owner.username}
             </p>
-            <p className="text-[10px] text-muted-foreground truncate">
+            <p className="text-xs text-muted-foreground truncate">
               Author • Public {notebook.role}
             </p>
           </div>
@@ -509,9 +509,9 @@ export default function PublicSharePage({
                 <Menu className="size-4" />
               </button>
             </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-72">
+            <SheetContent side="left" className="p-0 w-80">
               <SheetHeader className="p-4 border-b">
-                <SheetTitle className="flex items-center gap-2 text-sm font-semibold">
+                <SheetTitle className="flex items-center gap-2 text-base font-semibold">
                   <span>{notebook.icon || "📝"}</span>
                   <span className="truncate">{notebook.title}</span>
                 </SheetTitle>
@@ -623,7 +623,7 @@ export default function PublicSharePage({
       <div className="flex-1 flex overflow-hidden">
         {/* Desktop Sidebar (Collapsible) */}
         {sidebarOpen && (
-          <aside className="hidden lg:flex flex-col w-64 border-r bg-muted/10 shrink-0">
+          <aside className="hidden lg:flex flex-col w-72 border-r bg-muted/10 shrink-0">
             {renderTabsList()}
           </aside>
         )}
