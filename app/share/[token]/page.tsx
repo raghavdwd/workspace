@@ -339,6 +339,90 @@ export default function PublicSharePage({
     scheduleSave(activeTabIdRef.current, newContent);
   };
 
+  const signedInRef = useRef<boolean | null>(null);
+
+  const isSignedIn = async () => {
+    if (signedInRef.current !== null) return signedInRef.current;
+    try {
+      const res = await fetch("/api/user");
+      signedInRef.current = res.ok;
+    } catch {
+      signedInRef.current = false;
+    }
+    return signedInRef.current;
+  };
+
+  const applyContent = (nextContent: string) => {
+    setTabContent(nextContent);
+    tabContentRef.current = nextContent;
+    setTabsState((prev) =>
+      prev.map((t) =>
+        t.id === activeTabIdRef.current ? { ...t, content: nextContent } : t,
+      ),
+    );
+    scheduleSave(activeTabIdRef.current, nextContent);
+  };
+
+  const replacePlaceholder = (placeholder: string, replacement: string) => {
+    applyContent(tabContentRef.current.replace(placeholder, replacement));
+  };
+
+  async function uploadSharedImage(
+    file: File,
+    placeholder: string,
+    name: string,
+  ) {
+    const formData = new FormData();
+    formData.append("file", file, name);
+    formData.append("notebookId", String(notebook?.id));
+    try {
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) throw new Error("Image upload failed");
+      const { url } = (await response.json()) as { url: string };
+      replacePlaceholder(placeholder, `![${name}](${url})`);
+    } catch {
+      replacePlaceholder(placeholder, `![Upload failed — ${name}](uploading)`);
+      toast.error(`Upload failed for ${name}`);
+    }
+  }
+
+  const handleImagePaste = async (
+    event: React.ClipboardEvent<HTMLTextAreaElement>,
+  ) => {
+    if (!isEditor) return;
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (files.length === 0) return;
+
+    event.preventDefault();
+    if (!(await isSignedIn())) {
+      toast.error("Sign in to paste images into this notebook");
+      return;
+    }
+
+    const start = event.currentTarget.selectionStart;
+    const end = event.currentTarget.selectionEnd;
+    const timestamp = Date.now();
+    const placeholders = files.map(
+      (_, index) =>
+        `![Uploading pasted-image-${timestamp}-${index}…](uploading)`,
+    );
+    const current = tabContentRef.current;
+    applyContent(current.slice(0, start) + placeholders.join("\n") + current.slice(end));
+
+    await Promise.all(
+      files.map((file, index) => {
+        const name = file.name || `pasted-image-${timestamp}-${index}.png`;
+        return uploadSharedImage(file, placeholders[index], name);
+      }),
+    );
+  };
+
   const copyShareLink = () => {
     if (typeof window !== "undefined") {
       navigator.clipboard.writeText(window.location.href);
@@ -690,6 +774,7 @@ export default function PublicSharePage({
                   ref={textareaRef}
                   value={tabContent}
                   onChange={handleContentChange}
+                  onPaste={handleImagePaste}
                   className="w-full min-h-[500px] bg-transparent border-none outline-none resize-none leading-relaxed sm:leading-7 text-[15px] sm:text-base font-mono text-foreground placeholder:text-muted-foreground/35 selection:bg-primary/20 overflow-hidden"
                   placeholder="Start writing in markdown..."
                 />
